@@ -1,0 +1,45 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Salzburg Netz smart meter",
+        "description": "Create an API key in the Salzburg Netz service portal (Kundenkonto → Mein Benutzerkonto → API Schlüssel). The first download happens within a minute, then every day at 11:40.",
+        "data": {
+          "name": "Name",
+          "api_key": "API key",
+          "gpnr": "Customer number (GPNR, 8 digits)",
+          "zp": "Metering point (Zählpunkt, AT00…)"
+        }
+      },
+      "reconfigure": {
+        "title": "New Salzburg Netz API key",
+        "description": "Paste a new key from the Salzburg Netz service portal.",
+        "data": {
+          "api_key": "API key"
+        }
+      }
+    },
+    "error": {
+      "invalid_gpnr": "The customer number has 8 digits and starts with 1.",
+      "invalid_zp": "The metering point has 33 characters and starts with AT00 (or is a 10-digit installation number starting with 003).",
+      "invalid_key": "That doesn't look like a complete API key."
+    },
+    "abort": {
+      "already_configured": "This metering point is already set up.",
+      "reconfigure_successful": "The new API key is saved."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "last_full_day": {
+        "name": "Last full day"
+      },
+      "data_until": {
+        "name": "Data until"
+      },
+      "status": {
+        "name": "Sync status"
+      }
+    }
+  }
+}
