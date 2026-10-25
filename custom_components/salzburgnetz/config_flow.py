@@ -7,14 +7,22 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
+from homeassistant.core import callback
 from homeassistant.helpers.selector import (
+    EntitySelector,
+    EntitySelectorConfig,
     TextSelector,
     TextSelectorConfig,
     TextSelectorType,
 )
 
-from .const import CONF_API_KEY, CONF_GPNR, CONF_ZP, DOMAIN
+from .const import CONF_API_KEY, CONF_GPNR, CONF_PRICE_ENTITY, CONF_ZP, DOMAIN
 
 CONF_NAME = "name"
 
@@ -47,6 +55,11 @@ class SalzburgNetzConfigFlow(ConfigFlow, domain=DOMAIN):
     """
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+        return SalzburgNetzOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -98,4 +111,26 @@ class SalzburgNetzConfigFlow(ConfigFlow, domain=DOMAIN):
                 }
             ),
             errors=errors,
+        )
+
+
+class SalzburgNetzOptionsFlow(OptionsFlow):
+    """Pick the sensor that holds the electricity price (optional)."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(
+                data={CONF_PRICE_ENTITY: user_input.get(CONF_PRICE_ENTITY) or ""}
+            )
+        current = self.config_entry.options.get(CONF_PRICE_ENTITY) or None
+        key = (
+            vol.Optional(CONF_PRICE_ENTITY, description={"suggested_value": current})
+            if current
+            else vol.Optional(CONF_PRICE_ENTITY)
+        )
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema({key: EntitySelector(EntitySelectorConfig(domain="sensor"))}),
         )

@@ -40,8 +40,20 @@ From the Salzburg Netz service portal:
 
 1. Settings → Dashboards → **Energy** (or the Energy dashboard → ⋮ → Energy configuration).
 2. Under **Electricity grid** → **Add consumption** → choose **St. Gilgen consumption**. It is listed among the statistics, not as a normal sensor.
-3. Optional: enter your price per kWh.
+3. Optional: costs. Because the data is imported a day late, Home Assistant doesn't accept a price sensor or a fixed price here. Instead, let this integration import the costs (next section) and choose **Use a statistic tracking the total costs** → **St. Gilgen cost**.
 4. **Save**. Yesterday and earlier show up right away. Today stays empty until tomorrow after 11:40.
+
+## Costs from a price sensor (optional)
+
+If you have a sensor with your price per kWh (for example read from your bookkeeping app), the integration can also import the cost of every hour:
+
+1. Settings → Devices & services → Salzburg Netz → **Configure** → choose the **price sensor** → **Submit**.
+2. A statistic **… cost** (in your Home Assistant currency) appears. Add it in the Energy configuration as described above.
+
+How the price is applied:
+- If the price sensor has a `valid_from` attribute (a date like `2026-09-01`), the price counts from the start of that day, also for hours already imported. When a new price arrives with a later `valid_from`, the earlier price stays for the hours before it.
+- Without `valid_from`, a new price counts from the hour it changes.
+- Hours before the first known price get no cost. If the price sensor is unavailable, the last known prices are kept.
 
 ## Sensors it adds
 

@@ -12,10 +12,14 @@ from homeassistant.components.recorder.models import StatisticData, StatisticMet
 from homeassistant.components.recorder.statistics import async_add_external_statistics
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfEnergy
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import Event, EventStateChangedData, HomeAssistant, State, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.event import async_call_later, async_track_time_change
+from homeassistant.helpers.event import (
+    async_call_later,
+    async_track_state_change_event,
+    async_track_time_change,
+)
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
@@ -27,11 +31,13 @@ from .api import (
     SalzburgNetzRateLimited,
     parse_profile,
 )
+from .cost import Timeline, add_price, cost_rows, valid_from_timestamp
 from .const import (
     BACKFILL_CHUNKS_PER_DAY,
     CHUNK_DAYS,
     CONF_API_KEY,
     CONF_GPNR,
+    CONF_PRICE_ENTITY,
     CONF_ZP,
     DOMAIN,
     HISTORY_DAYS,
@@ -57,13 +63,16 @@ def statistic_id(zp: str, kind: str) -> str:
     return f"{DOMAIN}:{kind}_{zp[-7:].lower()}"
 
 
-def _metadata(stat_id: str, name: str) -> StatisticMetaData:
+COST = "cost"
+
+
+def _metadata(stat_id: str, name: str, unit: str = UnitOfEnergy.KILO_WATT_HOUR) -> StatisticMetaData:
     meta: dict[str, Any] = {
         "has_sum": True,
         "name": name,
         "source": DOMAIN,
         "statistic_id": stat_id,
-        "unit_of_measurement": UnitOfEnergy.KILO_WATT_HOUR,
+        "unit_of_measurement": unit,
     }
     fields = getattr(StatisticMetaData, "__annotations__", {})
     if StatisticMeanType is not None and "mean_type" in fields:
@@ -71,7 +80,7 @@ def _metadata(stat_id: str, name: str) -> StatisticMetaData:
     else:
         meta["has_mean"] = False
     if "unit_class" in fields:
-        meta["unit_class"] = "energy"
+        meta["unit_class"] = "energy" if unit == UnitOfEnergy.KILO_WATT_HOUR else None
     return meta  # type: ignore[return-value]
 
 
@@ -97,6 +106,8 @@ class SalzburgNetzSync:
         self._running = False
         self._pending: dict[str, int] = {}
         self._unsubs: list = []
+        self.price_entity: str | None = entry.options.get(CONF_PRICE_ENTITY) or None
+        self.prices: Timeline = []
 
     # --- lifecycle -------------------------------------------------------
 
@@ -107,6 +118,7 @@ class SalzburgNetzSync:
                 int(k): v for k, v in stored.get("hours", {}).get(kind, {}).items()
             }
         self.state = stored.get("state", {})
+        self.prices = stored.get("prices", [])
         if self.state.get("last_error"):
             self.status = self.state["last_error"]
         elif self.state.get("last_sync"):
@@ -117,6 +129,17 @@ class SalzburgNetzSync:
                 self.hass, self._scheduled, hour=SYNC_HOUR, minute=SYNC_MINUTE, second=0
             )
         )
+        if self.price_entity:
+            self._unsubs.append(
+                async_track_state_change_event(
+                    self.hass, [self.price_entity], self._price_event
+                )
+            )
+            if (current := self.hass.states.get(self.price_entity)) is not None:
+                await self._price_changed(current)
+            # Write costs once at start-up, also when the price sensor isn't loaded yet.
+            self._push_cost(0)
+
         if self._due_now():
             # Catch up shortly after start-up (first install, or HA was off at sync time).
             self._unsubs.append(async_call_later(self.hass, 30, self._scheduled))
@@ -130,7 +153,7 @@ class SalzburgNetzSync:
     async def async_remove(self) -> None:
         await self._store.async_remove()
         get_instance(self.hass).async_clear_statistics(
-            [statistic_id(self.zp, kind) for kind in KINDS]
+            [statistic_id(self.zp, kind) for kind in [*KINDS, COST]]
         )
 
     def _due_now(self) -> bool:
@@ -162,6 +185,8 @@ class SalzburgNetzSync:
             # One write per run, from the oldest hour that changed.
             for kind, from_hour in self._pending.items():
                 self._push(kind, from_hour)
+            if "consumption" in self._pending:
+                self._push_cost(self._pending["consumption"])
             self._pending.clear()
             self._running = False
             await self._save()
@@ -261,6 +286,49 @@ class SalzburgNetzSync:
         if rows:
             async_add_external_statistics(self.hass, _metadata(stat_id, name), rows)
 
+    # --- cost --------------------------------------------------------------
+
+    async def _price_event(self, event: Event[EventStateChangedData]) -> None:
+        if (new := event.data["new_state"]) is not None:
+            await self._price_changed(new)
+
+    async def _price_changed(self, state: State) -> None:
+        """Record a price and rewrite the cost from the hour it applies."""
+        try:
+            price = float(state.state)
+        except ValueError:
+            return  # unavailable / unknown: keep the prices we have
+        if price < 0 or price > 5:
+            _LOGGER.warning("Ignoring implausible electricity price %s from %s", price, self.price_entity)
+            return
+        now_hour = dt_util.utcnow().replace(minute=0, second=0, microsecond=0).timestamp()
+        start = valid_from_timestamp(state.attributes.get("valid_from"), now_hour, LOCAL_TZ)
+        self.prices, changed = add_price(self.prices, start, price)
+        if changed is None:
+            return
+        _LOGGER.info("Electricity price %s from %s", price, dt_util.utc_from_timestamp(changed))
+        self._push_cost(changed)
+        await self._save()
+
+    @callback
+    def _push_cost(self, from_hour: float) -> None:
+        if not self.prices:
+            return
+        rows = [
+            StatisticData(start=datetime.fromtimestamp(hour, timezone.utc), state=cost, sum=total)
+            for hour, cost, total in cost_rows(self.hours["consumption"], self.prices, from_hour)
+        ]
+        if rows:
+            async_add_external_statistics(
+                self.hass,
+                _metadata(
+                    statistic_id(self.zp, COST),
+                    f"{self.entry.title} cost",
+                    self.hass.config.currency,
+                ),
+                rows,
+            )
+
     def _set_error(self, message: str) -> None:
         _LOGGER.warning("Salzburg Netz: %s", message)
         self.status = message
@@ -274,6 +342,7 @@ class SalzburgNetzSync:
                     for kind, hours in self.hours.items()
                 },
                 "state": self.state,
+                "prices": self.prices,
             }
         )
 

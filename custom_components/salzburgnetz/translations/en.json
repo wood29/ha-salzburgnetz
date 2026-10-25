@@ -41,5 +41,16 @@
         "name": "Sync status"
       }
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Electricity price",
+        "description": "Optional: choose a sensor with your price per kWh (e.g. from your bookkeeping app). The integration then also imports the cost of each hour, which the Energy dashboard shows. If the sensor has a `valid_from` attribute, the price is applied from that day; otherwise from the moment it changes.",
+        "data": {
+          "price_entity": "Price sensor (per kWh)"
+        }
+      }
+    }
   }
 }

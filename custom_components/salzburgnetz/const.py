@@ -7,6 +7,9 @@ API_BASE = "https://api.salzburgnetz.at/api/v1"
 CONF_API_KEY = "api_key"
 CONF_GPNR = "gpnr"
 CONF_ZP = "zp"
+# Optional: a sensor with the price per kWh (e.g. from a bookkeeping app). Its
+# `valid_from` attribute, if present, says from which day that price applies.
+CONF_PRICE_ENTITY = "price_entity"
 
 # Data is refreshed once a day and mostly complete by 10-12h (per Salzburg Netz).
 SYNC_HOUR = 11

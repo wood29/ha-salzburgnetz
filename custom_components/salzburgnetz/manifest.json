@@ -1,14 +1,18 @@
 {
   "domain": "salzburgnetz",
   "name": "Salzburg Netz Smart Meter",
-  "codeowners": ["@wood29"],
+  "codeowners": [
+    "@wood29"
+  ],
   "config_flow": true,
-  "dependencies": ["recorder"],
+  "dependencies": [
+    "recorder"
+  ],
   "documentation": "https://github.com/wood29/ha-salzburgnetz",
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/wood29/ha-salzburgnetz/issues",
   "requirements": [],
   "single_config_entry": false,
-  "version": "0.1.0"
+  "version": "0.2.0"
 }

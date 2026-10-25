@@ -18,7 +18,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: SalzburgNetzConfigEntry)
     await sync.async_start()
     entry.runtime_data = sync
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    entry.async_on_unload(entry.add_update_listener(_options_updated))
     return True
+
+
+async def _options_updated(hass: HomeAssistant, entry: SalzburgNetzConfigEntry) -> None:
+    """A different price sensor was chosen: start again with it."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: SalzburgNetzConfigEntry) -> bool:
